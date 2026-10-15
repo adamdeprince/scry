@@ -175,6 +175,46 @@ Copy each report back to `dist/HOST/public-install.json`, then run
 `python3 scripts/deploy.py verification`. This validates every report against
 the release hashes, publishes the reports, and marks public installation as
 passed in the signed package catalogs.
+To record a subset while another installation is pending, explicitly select it:
+
+```sh
+python3 scripts/deploy.py verification \
+  --verified-host naamah --verified-host graviton5 --verified-host loongson
+```
+
+Unselected targets keep their existing verification status. A sandbox may allow
+building and downloading the Mac archive while denying writes to
+`/opt/homebrew/Cellar`; that does not count as a successful Homebrew installation.
+Run the installation and verification from a terminal with Homebrew write access.
+Do not change ownership of a correctly owned Cellar to work around a sandbox.
+
+If Apple Git stalls while fetching the static HTTPS tap, HTTP/1.1 can be selected
+for just that command without changing global Git configuration:
+
+```sh
+GIT_CONFIG_COUNT=1 GIT_CONFIG_KEY_0=http.version GIT_CONFIG_VALUE_0=HTTP/1.1 \
+  brew tap goblinreactor/tap https://brew.goblinreactor.com/homebrew-tap.git
+```
+
+Validate formula DSL changes with the installed Homebrew interpreter before
+publishing, in addition to Ruby syntax checking:
+
+```sh
+brew ruby -e 'require "formula"; load ARGV.fetch(0)' dist/local/goblin-scry.rb
+```
+
+Recipe corrections can use the existing tested binary:
+
+```sh
+python3 scripts/release.py formula --build-info dist/local/build-info.json \
+  --output dist/local/goblin-scry.rb
+python3 scripts/deploy.py packages
+```
+
+The formula command checks the archive checksum and validates the recipe.
+Formula snapshots
+have content-hashed filenames; the tap selects the current recipe. Record
+installation verification again after republishing catalogs.
 
 The 0.1.0 binary source snapshot is commit `d52f3d7`. Subsequent commits improve
 publication and installation verification without changing those binary sources.

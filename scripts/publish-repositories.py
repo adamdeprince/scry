@@ -62,9 +62,10 @@ def artifact(site, path):
             'filename': path.name, 'size': path.stat().st_size, 'sha256': digest(path)}
 
 
-def installation_reports(stage, builds):
+def installation_reports(stage, builds, targets=None):
     reports = {}
-    for target, info in builds.items():
+    for target in targets or builds:
+        info = builds[target]
         report = json.loads((stage / target / 'public-install.json').read_text())
         if (report['build_host'], report['version'], report['source_sha256'], report['artifact_sha256']) != (
                 target, info['version'], info['source_sha256'], info['sha256']):
@@ -75,17 +76,19 @@ def installation_reports(stage, builds):
     return reports
 
 
-def record_installations(stage, admin, distribution, builds):
-    reports = installation_reports(stage, builds)
+def record_installations(stage, admin, distribution, builds, targets=None):
+    reports = installation_reports(stage, builds, targets)
     for name in ('apt', 'brew'):
+        selected = [t for t in (('local',) if name == 'brew' else TARGETS[1:]) if t in reports]
+        if not selected:
+            continue
         site = distribution / (name + '.goblinreactor.com')
         with (admin / (name + '-publish.lock')).open('a') as lock:
             fcntl.flock(lock, fcntl.LOCK_EX)
             catalog = json.loads((site / 'packages.json').read_text())
-            targets = ('local',) if name == 'brew' else TARGETS[1:]
             inventory = {a['path']: a for a in catalog.get('artifacts', []) if 'path' in a}
             legacy = [a for a in catalog.get('artifacts', []) if 'path' not in a]
-            for target in targets:
+            for target in selected:
                 records = [p for p in catalog['packages'] if p['name'] == 'goblin-scry' and p.get('build_host') == target]
                 if len(records) != 1 or records[0]['sha256'] != builds[target]['sha256']:
                     raise RuntimeError('Published build differs from installation report: ' + target)
@@ -106,7 +109,7 @@ def record_installations(stage, admin, distribution, builds):
                 temporary = dst.with_name(dst.name + '.scry-new')
                 shutil.copy2(src, temporary)
                 temporary.replace(dst)
-    print('Recorded all four installed-package checks in signed catalogs.')
+    print('Recorded installed-package checks in signed catalogs:', ', '.join(reports))
 
 
 def publish(args):
@@ -117,7 +120,7 @@ def publish(args):
         print('All four native build manifests and source/binary checksums passed.')
         return
     if args.record_installations:
-        record_installations(stage, admin, distribution, builds)
+        record_installations(stage, admin, distribution, builds, args.verified_host)
         return
     with contextlib.ExitStack() as stack:
         # Use the same locks as the existing Goblin publishers.
@@ -152,7 +155,10 @@ def publish(args):
         if builds['local']['sha256'] not in formula.read_text():
             raise RuntimeError('Formula checksum does not match binary archive')
         immutable(stage / 'local' / builds['local']['artifact'], brew / release_path / builds['local']['artifact'])
-        immutable(formula, brew / release_path / formula.name)
+        # Formula metadata can be fixed without rebuilding the binary. Keep each
+        # recipe immutable under its own hash while the tap selects the latest.
+        formula_path = brew / release_path / ('goblin-scry-' + digest(formula) + '.rb')
+        immutable(formula, formula_path)
         # The public NFS mount maps ownership to its distribution account. Keep
         # the working checkout on local disk so Git's ownership check remains on.
         with tempfile.TemporaryDirectory(prefix='scry-tap-') as temporary:
@@ -208,7 +214,7 @@ def publish(args):
             catalog['packages'] = records + retained + others
             if name == 'brew':
                 catalog['tap_commit'] = output(*git, '--git-dir', tap, 'rev-parse', 'refs/heads/main')
-                files.append(site / release_path / 'goblin-scry.rb')
+                files.append(formula_path)
             summary = '<section id="goblin-scry"><h2>Goblin Scry</h2><p>RDP, VNC, X11 and Wayland desktops in your terminal. GPLv3. <a href="https://scry.goblinreactor.com/">Documentation and installation</a>.</p><p>Version ' + html.escape(release_version) + '.</p></section>\n'
             page = (site / 'index.html').read_text()
             import re
@@ -253,4 +259,5 @@ if __name__ == '__main__':
     parser.add_argument('--distribution', type=Path, default=Path('/mnt/distribution'))
     parser.add_argument('--check', action='store_true')
     parser.add_argument('--record-installations', action='store_true')
+    parser.add_argument('--verified-host', action='append', choices=TARGETS)
     publish(parser.parse_args())

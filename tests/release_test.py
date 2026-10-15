@@ -88,6 +88,12 @@ class ReleaseTests(unittest.TestCase):
         release.write_json(path, report)
         with self.assertRaisesRegex(RuntimeError, 'different build'):
             publisher.installation_reports(self.root, builds)
+        report['artifact_sha256'] = builds['loongson']['sha256']
+        release.write_json(path, report)
+        (self.root / 'local/public-install.json').unlink()
+        self.assertEqual(set(publisher.installation_reports(self.root, builds, ['loongson'])), {'loongson'})
+        with self.assertRaises(FileNotFoundError):
+            publisher.installation_reports(self.root, builds)
 
     def test_distinct_loongarch_abi(self):
         self.fixture()

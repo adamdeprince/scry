@@ -224,6 +224,23 @@ def make_deb(root, stage, dest, package_version, architecture):
     return package, depends + ', ca-certificates'
 
 
+def homebrew_formula(info, destination, root=ROOT):
+    formula = (root / 'packaging/homebrew/goblin-scry.rb.in').read_text()
+    for key, value in {'VERSION': info['version'], 'ARCHIVE': info['artifact'], 'SHA256': info['sha256']}.items():
+        formula = formula.replace('@' + key + '@', value)
+    destination.write_text(formula)
+    run('ruby', '-c', destination)
+    if platform.system() == 'Darwin':
+        run('brew', 'ruby', '-e', 'require "formula"; load ARGV.fetch(0)', destination)
+
+
+def refresh_formula(args):
+    info = json.loads(args.build_info.read_text())
+    if digest(args.build_info.parent / info['artifact']) != info['sha256']:
+        raise RuntimeError('Binary archive differs from the build manifest')
+    homebrew_formula(info, args.output.resolve())
+
+
 def build_native(args):
     source = args.source.resolve()
     expected = args.sha256 or (source.parent / (source.name + '.sha256')).read_text().split()[0]
@@ -293,11 +310,8 @@ def build_native(args):
         with tarfile.open(package, 'w:gz') as tar:
             for child in sorted(stage.iterdir()):
                 tar.add(child, arcname=child.name, filter=archive_metadata)
-        formula = (root / 'packaging/homebrew/goblin-scry.rb.in').read_text()
-        for key, value in {'VERSION': release_version, 'ARCHIVE': package.name, 'SHA256': digest(package)}.items():
-            formula = formula.replace('@' + key + '@', value)
-        (dest / 'goblin-scry.rb').write_text(formula)
-        run('ruby', '-c', dest / 'goblin-scry.rb')
+        homebrew_formula({'version': release_version, 'artifact': package.name, 'sha256': digest(package)},
+                         dest / 'goblin-scry.rb', root)
         manifest.update(format='homebrew-binary', architecture='arm64', dependencies=['openssl@3', 'jpeg-turbo'])
     else:
         architecture = output('dpkg', '--print-architecture')
@@ -359,6 +373,10 @@ def main():
     source.add_argument('--output', type=Path, default=ROOT / 'dist/source')
     source.add_argument('--dependencies', type=Path, default=ROOT / 'build/deps-work')
     source.set_defaults(action=source_archive)
+    formula = commands.add_parser('formula')
+    formula.add_argument('--build-info', type=Path, required=True)
+    formula.add_argument('--output', type=Path, required=True)
+    formula.set_defaults(action=refresh_formula)
     native = commands.add_parser('build-native')
     native.add_argument('--source', type=Path, required=True)
     native.add_argument('--sha256')

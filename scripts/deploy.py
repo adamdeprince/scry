@@ -35,7 +35,7 @@ def packages(args):
     spec.loader.exec_module(module)
     builds = module.validate(args.dist)
     if args.action == 'verification':
-        module.installation_reports(args.dist, builds)
+        module.installation_reports(args.dist, builds, args.verified_host)
     identity = 'goblin-scry-' + builds['local']['version'] + '-' + builds['local']['source_sha256']
     remote_relative = '.incoming/' + identity + '/'
     remote = '/mnt/distribution/apt.goblinreactor.com/' + remote_relative
@@ -54,6 +54,8 @@ def packages(args):
         command = ['python3', remote + 'publish-repositories.py', '--stage', remote]
         if args.action == 'verification':
             command.append('--record-installations')
+            for target in args.verified_host or []:
+                command += ['--verified-host', target]
         run('ssh', '-S', 'none', args.host, shlex.join(command))
 
 
@@ -95,6 +97,7 @@ def main():
     parser.add_argument('action', choices=('packages', 'website', 'nginx', 'verification'))
     parser.add_argument('--host', default='hail')
     parser.add_argument('--dist', type=Path, default=ROOT / 'dist')
+    parser.add_argument('--verified-host', action='append', choices=('local', 'naamah', 'graviton5', 'loongson'))
     args = parser.parse_args()
     {'packages': packages, 'website': website, 'nginx': nginx, 'verification': packages}[args.action](args)
 
