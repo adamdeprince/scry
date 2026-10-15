@@ -32,7 +32,7 @@ does not establish that HPSS works.
 
 The transport requests a virtual display with its default privacy curtain,
 which can blank the host's physical display while connected. This also applies
-to localhost testing. Use an HDR-capable Silkie terminal with `hdr yes` enabled
+to localhost testing. Use an HDR-capable Silkie terminal with `hdr always` (or `hdr auto`) enabled
 for a live HDR check. Enabling HDR in Silkie is separate from enabling Screen
 Sharing on macOS.
 
@@ -85,6 +85,9 @@ implemented. The adapter consumes the upstream decoder's latest frame for each
 video tile; it is a desktop viewer, not a lossless video recorder.
 
 ## Tests and live validation
+
+For a public browser sample through the real 16-bit renderer, see
+[HDR-EXAMPLE.md](HDR-EXAMPLE.md). That demonstration makes no HPSS connection.
 
 ```sh
 ctest --test-dir build --output-on-failure

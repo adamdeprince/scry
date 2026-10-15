@@ -261,6 +261,10 @@ It checks the uploaded index checksum, the backend path, the local nginx Host
 route, and public HTTPS. If DNS or CDN configuration is missing, it reports
 the failed verification without claiming the site is live.
 
+The HDR illustration uses an actual HDR AVIF and an SDR fallback. Reproduce and
+verify it with [HDR-EXAMPLE.md](HDR-EXAMPLE.md). The nginx route supplies the
+correct `image/avif` type for successful AVIF responses from the storage origin.
+
 ## Commit and push source
 
 ```sh
