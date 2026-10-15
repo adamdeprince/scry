@@ -25,16 +25,17 @@ Size size(std::string_view value, int maximum) {
 void help() {
     std::cout << "Goblin Scry " GOBLIN_SCRY_VERSION " — graphical desktops in your terminal\n"
         "Copyright (C) 2026 Adam DePrince. Licensed under GPLv3; no warranty.\n\n"
-        "Usage: goblin-scry rdp|vnc HOST [options]\n"
+        "Usage: goblin-scry rdp|vnc|hpss HOST [options]\n"
         "       goblin-scry demo [options]\n\n"
         "       goblin-scry x11|wayland [options] [-- COMMAND [ARG...]]\n\n"
-        "  --username USER       RDP / Apple ARD account\n"
+        "  --username USER       RDP / Apple ARD / HPSS account\n"
+        "  --hdr auto|on|off     HPSS HDR negotiation (auto); always 16-bit channels\n"
         "  --domain DOMAIN       RDP domain\n"
-        "  --port PORT           TCP port (RDP 3389, VNC 5900)\n"
-        "  --size WIDTHxHEIGHT   Requested RDP / demo pixels (1280x720)\n"
+        "  --port PORT           TCP port (RDP 3389, VNC / HPSS 5900)\n"
+        "  --size WIDTHxHEIGHT   Requested RDP / HPSS / demo pixels (1280x720)\n"
         "  --magnification N    Enlarge pixels by a positive integer factor (1)\n"
         "  --cell-size WxH       Override terminal cell pixel measurement\n"
-        "  --max-tiles COUNT     Terminal image budget (262144)\n"
+        "  --max-tiles COUNT     Optional terminal image budget (0 = unlimited)\n"
         "  --view-only           Disable remote keyboard and mouse input\n"
         "  --insecure            Disable RDP certificate verification\n\n"
         "Password: GOBLIN_PASSWORD environment variable, or a hidden prompt.\n"
@@ -46,7 +47,7 @@ void help() {
 #ifdef GOBLIN_WITH_VNC
     std::cout << " LibVNCClient (Apple ARD)";
 #endif
-    std::cout << " demo\n"
+    std::cout << " HPSS (optional iShareScreen runtime) demo\n"
         "Local modes: x11 (TigerVNC + xrandr), wayland (Sway + wayvnc).\n"
         "Local desktops fill the terminal and follow its pixel resolution.\n"
         "Use -- COMMAND to launch an application inside the local display.\n";
@@ -58,8 +59,8 @@ public:
         pixels_.resize(static_cast<size_t>(size_.width) * size_.height * 4);
         for (int y = 0; y < size_.height; ++y) for (int x = 0; x < size_.width; ++x) {
             const size_t index = (static_cast<size_t>(y) * size_.width + x) * 4;
-            pixels_[index] = static_cast<uint8_t>(x * 255 / size_.width);
-            pixels_[index + 1] = static_cast<uint8_t>(y * 255 / size_.height);
+            pixels_[index] = static_cast<uint8_t>(int64_t(x) * 255 / size_.width);
+            pixels_[index + 1] = static_cast<uint8_t>(int64_t(y) * 255 / size_.height);
             pixels_[index + 2] = 80;
         }
         session.resize(size_); last_ = std::chrono::steady_clock::now();
@@ -121,10 +122,10 @@ int main(int argc, char** argv) {
         }
         Options options; options.protocol = argv[1];
         const bool local = options.protocol == "x11" || options.protocol == "wayland";
-        if (options.protocol != "rdp" && options.protocol != "vnc" && options.protocol != "demo" && !local)
-            throw std::runtime_error("protocol must be rdp, vnc, x11, wayland, or demo");
+        if (options.protocol != "rdp" && options.protocol != "vnc" && options.protocol != "hpss" && options.protocol != "demo" && !local)
+            throw std::runtime_error("protocol must be rdp, vnc, hpss, x11, wayland, or demo");
         int index = 2;
-        if (options.protocol == "rdp" || options.protocol == "vnc") {
+        if (options.protocol == "rdp" || options.protocol == "vnc" || options.protocol == "hpss") {
             if (index >= argc || argv[index][0] == '-') throw std::runtime_error("missing server hostname");
             options.host = argv[index++];
         }
@@ -140,7 +141,12 @@ int main(int argc, char** argv) {
             if (arg == "--insecure") { options.insecure = true; continue; }
             if (index >= argc) throw std::runtime_error("missing value for " + std::string(arg));
             const std::string_view value = argv[index++];
-            if (arg == "--username") options.username = value;
+            if (arg == "--hdr") {
+                if (options.protocol != "hpss" || (value != "auto" && value != "on" && value != "off"))
+                    throw std::runtime_error("--hdr requires hpss and auto, on, or off");
+                options.hdr = value;
+            }
+            else if (arg == "--username") options.username = value;
             else if (arg == "--domain") options.domain = value;
             else if (arg == "--port") {
                 if (local) throw std::runtime_error("local display modes use a private Unix socket; --port is not supported");
@@ -148,18 +154,25 @@ int main(int argc, char** argv) {
             }
             else if (arg == "--size") {
                 if (local) throw std::runtime_error("local display modes use the full terminal resolution; --size is not supported");
-                options.desktop = size(value, 32768);
+                options.desktop = size(value, INT_MAX);
             }
             else if (arg == "--magnification") options.magnification = integer(value, INT_MAX);
-            else if (arg == "--cell-size") options.cell = size(value, 512);
-            else if (arg == "--max-tiles") options.max_tiles = integer(value, 262144);
+            else if (arg == "--cell-size") options.cell = size(value, INT_MAX);
+            else if (arg == "--max-tiles") {
+                const auto parsed = std::from_chars(value.data(), value.data() + value.size(), options.max_tiles);
+                if (parsed.ec != std::errc{} || parsed.ptr != value.data() + value.size() || options.max_tiles >= UINT32_MAX)
+                    throw std::runtime_error("invalid Kitty image budget");
+            }
             else throw std::runtime_error("unknown option: " + std::string(arg));
         }
+        if (options.protocol == "hpss" && options.username.empty())
+            throw std::runtime_error("HPSS requires --username");
         validate_desktop(options.desktop);
         if (!local && options.protocol != "vnc") grid_size(options.desktop, {512, 512}, options.magnification);
         auto pending_backend = options.protocol == "demo" ? std::unique_ptr<Backend>(std::make_unique<Demo>()) :
-                       local ? make_local(options.protocol) : options.protocol == "rdp" ? make_rdp() : make_vnc();
-        if (options.protocol == "rdp" || options.protocol == "vnc") {
+                       local ? make_local(options.protocol) : options.protocol == "hpss" ? make_hpss() :
+                       options.protocol == "rdp" ? make_rdp() : make_vnc();
+        if (options.protocol == "rdp" || options.protocol == "vnc" || options.protocol == "hpss") {
             if (const char* password = getenv("GOBLIN_PASSWORD")) options.password = password;
             else options.password = prompt_password();
         }

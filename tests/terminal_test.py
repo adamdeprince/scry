@@ -17,11 +17,13 @@ import termios
 import time
 
 class Terminal:
-    def __init__(self, executable, arguments, cell=(2, 3), report=True, env=None, pass_fds=(), pixel_mouse=False, pixels=None):
+    def __init__(self, executable, arguments, cell=(2, 3), report=True, env=None, pass_fds=(), pixel_mouse=False, pixels=None, hdr=False):
         self.master, self.slave = pty.openpty()
         self.saved = termios.tcgetattr(self.slave)
         self.cell = cell
         self.pixels = pixels
+        self.hdr = hdr
+        self.formats = {}
         self.report = report
         self.pixel_mouse = pixel_mouse
         self.resizes = []
@@ -85,11 +87,16 @@ class Terminal:
                 assert body.startswith(b'G'), body
                 header, payload = body[1:].split(b';', 1)
                 fields = dict(item.split(b'=', 1) for item in header.split(b',') if item)
+                if fields.get(b'a') == b'q':
+                    assert len(base64.b64decode(payload)) == 8
+                    response = b'OK' if self.hdr else b'EINVAL'
+                    self.send(b'\x1b_Gi=' + fields[b'i'] + b';' + response + b'\x1b\\')
+                    continue
                 if fields.get(b'a') == b'd':
                     self.images.pop(int(fields[b'i']), None)
                     continue
                 if fields.get(b'a') == b'T':
-                    assert fields[b'f'] == b'24' and fields[b'c'] == b'1' and fields[b'r'] == b'1'
+                    assert fields[b'f'] in ((b'24', b'64') if self.hdr else (b'24',)) and fields[b'c'] == b'1' and fields[b'r'] == b'1'
                     assert fields[b'C'] == b'1' and fields[b'q'] == b'2'
                     self.pending_image = (fields, bytearray())
                 assert self.pending_image is not None
@@ -100,7 +107,8 @@ class Terminal:
                     image_id = int(fields[b'i'])
                     pixels = base64.b64decode(encoded, validate=True)
                     dimensions = (int(fields[b's']), int(fields[b'v']))
-                    assert len(pixels) == dimensions[0] * dimensions[1] * 3
+                    assert len(pixels) == dimensions[0] * dimensions[1] * (8 if fields[b'f'] == b'64' else 3)
+                    self.formats[image_id] = int(fields[b'f'])
                     self.images[image_id] = (dimensions, pixels)
                     self.updates.append(image_id)
                     self.pending_image = None

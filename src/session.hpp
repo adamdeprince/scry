@@ -10,11 +10,12 @@
 namespace goblin {
 struct Options {
     std::string protocol, host, username, password, domain;
+    std::string hdr = "auto";
     std::vector<std::string> command;
     int port = 0;
     int magnification = 1;
     Size desktop{1280, 720}, cell;
-    size_t max_tiles = 262144;
+    size_t max_tiles = 0;
     bool view_only = false, insecure = false;
 };
 class Session;
@@ -30,6 +31,7 @@ public:
     virtual void resize_desktop(Size) {}
 };
 std::unique_ptr<Backend> make_rdp();
+std::unique_ptr<Backend> make_hpss();
 // A connected socket can be supplied by an embedding launcher (ownership transfers).
 std::unique_ptr<Backend> make_vnc(int connected_socket = -1);
 std::unique_ptr<Backend> make_local(const std::string& protocol);
@@ -48,6 +50,7 @@ public:
     void check_error() const { if (error_) std::rethrow_exception(error_); }
     Renderer& renderer() { return renderer_; }
     Size display_size() const;
+    bool hdr_supported() const { return hdr_supported_; }
 private:
     void event(const Event& event);
     Terminal& terminal_;
@@ -57,6 +60,7 @@ private:
     Size cell_, viewport_, desktop_, pixels_, pending_display_;
     bool local_ = false, display_dirty_ = false;
     bool fixed_cell_ = false, view_only_ = false, pixel_mouse_ = false, quit_ = false;
+    bool hdr_probe_ = false, hdr_supported_ = false;
     int mouse_mask_ = 0;
     int magnification_ = 1;
     std::exception_ptr error_;

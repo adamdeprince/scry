@@ -14,9 +14,20 @@ Session::Session(Terminal& terminal, const Options& options)
     if (magnification_ < 1) throw std::runtime_error("magnification must be a positive integer");
     viewport_ = terminal.cells(); renderer_.viewport(viewport_);
     pixels_ = terminal.pixels();
+    hdr_probe_ = options.protocol == "hpss" && options.hdr != "off";
+    if (hdr_probe_) {
+        // An opaque black binary16 pixel; query actions never create images.
+        terminal_.write("\033_Ga=q,t=d,f=64,s=1,v=1,i=" + std::to_string(hdr_query_id) +
+                        ";AAAAAAAAADw=\033\\");
+        terminal_.flush();
+    }
     // Allow authoritative XTWINOPS replies to supersede ioctl-derived geometry.
     const auto deadline = std::chrono::steady_clock::now() + std::chrono::milliseconds(500);
     while (!stopping() && std::chrono::steady_clock::now() < deadline) poll(20);
+    hdr_probe_ = false;
+    if (!stopping() && options.hdr == "on" && !hdr_supported_)
+        throw std::runtime_error("terminal did not confirm Silkie f=64 HDR support; use --hdr auto or off");
+    renderer_.hdr_output(hdr_supported_);
     if (cell_.width <= 0 || cell_.height <= 0) cell_ = terminal.cell_pixels();
     if (cell_.width <= 0 || cell_.height <= 0)
         throw std::runtime_error("terminal did not report cell pixels; supply --cell-size WIDTHxHEIGHT");
@@ -82,9 +93,12 @@ void Session::paint() {
 void Session::event(const Event& value) {
     switch (value.type) {
     case EventType::quit: quit_ = true; break;
+    case EventType::hdr_format:
+        if (hdr_probe_) hdr_supported_ = true;
+        break;
     case EventType::cell_size:
         if (!fixed_cell_ && value.size.width > 0 && value.size.height > 0 &&
-            value.size.width <= 512 && value.size.height <= 512 && value.size != cell_) {
+            value.size != cell_) {
             cell_ = value.size;
             display_dirty_ = true;
             display_changed_ = std::chrono::steady_clock::now();

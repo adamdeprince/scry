@@ -10,7 +10,8 @@ enum class Key : uint32_t {
     page_up, page_down, insert, del, f1, f2, f3, f4, f5, f6, f7, f8, f9, f10, f11, f12,
     shift, control, alt, super
 };
-enum class EventType { key, mouse, cell_size, terminal_size, pixel_size, mouse_mode, quit };
+inline constexpr uint32_t hdr_query_id = UINT32_MAX;
+enum class EventType { key, mouse, cell_size, terminal_size, pixel_size, mouse_mode, hdr_format, quit };
 struct Event {
     EventType type = EventType::key;
     uint32_t key = 0;

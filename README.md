@@ -3,7 +3,7 @@
 Graphical desktops in your terminal. [Homepage](https://scry.goblinreactor.com/)
 · [Source](https://github.com/adamdeprince/scry)
 
-RDP, VNC, and local X11/Wayland desktops inside a terminal that speaks Kitty graphics, including
+RDP, VNC, experimental Apple HPSS, and local X11/Wayland desktops inside a terminal that speaks Kitty graphics, including
 Goblin View. The client displays remote pixels at their original size by default,
 with integer magnification available for Retina and other high-density displays.
 It uses one graphic element per character cell. Only cells whose pixels changed
@@ -14,13 +14,20 @@ LibVNCClient, including its Apple Remote Desktop (ARD, security type 30)
 username/password authentication. Apple Screen Sharing can use that account
 authentication without enabling a separate legacy VNC password.
 
+The optional HPSS backend uses iShareScreen and keeps decoded pixels in 16-bit
+floating-point channels. Silkie terminals can receive linear HDR pixels through
+its `f=64` protocol. See [HPSS setup, licensing, and validation](docs/HPSS.md);
+the published 0.1.0 packages predate this experimental backend.
+
 ## License
 
 Copyright (C) 2026 Adam DePrince. Goblin Scry is licensed under the GNU General
 Public License, version 3 only (`GPL-3.0-only`). See [LICENSE](LICENSE) and
 [THIRD_PARTY.md](THIRD_PARTY.md). LibVNCClient's GPL-2.0-or-later terms require
 GPL distribution of the linked application; GPLv3 is compatible with FreeRDP's
-Apache-2.0 license.
+Apache-2.0 license. The optional HPSS runtime adds iShareScreen under AGPLv3;
+GPLv3 section 13 permits this combination, with AGPL network-source requirements
+applying to the combination. See [HPSS licensing](docs/HPSS.md#licensing-and-distribution).
 
 ## Packages and releases
 
@@ -188,8 +195,10 @@ Goblin View's `src/term.cc` already accepts this resize request and relays the
 host cell size. Its current 4,096-image/placement limit needs increasing for
 larger desktops: the example above requires 12,840 placements and images.
 The Goblin View capacity change is being handled separately. `--max-tiles`
-can bound allocations to a terminal's image budget; the client default is
-262,144. Exceeding it produces an error instead of evicting images silently.
+can bound allocations to a terminal's image budget; the default, 0, imposes no
+additional tile limit. Allocation size and Kitty image identifier overflow are
+checked. Exceeding an explicit budget produces an error instead of evicting
+images silently.
 
 A terminal may cap or ignore the requested size. The client draws visible
 cells at the selected magnification and retains damage for clipped cells. Enlarge the
@@ -213,7 +222,9 @@ session. These checks do not launch a GUI terminal.
 
 ## Rendering
 
-Both backends decode into a four-byte-per-pixel framebuffer. RDP's GDI damage
+RDP and VNC decode into a four-byte-per-pixel framebuffer. HPSS uses
+eight-byte linear RGBA binary16 pixels throughout, with HDR output after
+Silkie capability negotiation and SDR conversion at the output boundary. RDP's GDI damage
 regions and VNC's update rectangles mark candidate cells. The renderer reads
 only those cells and compares their RGB pixels with the last displayed values.
 An identical update produces no terminal output. Cursor movement in RDP
@@ -270,8 +281,9 @@ The RDP adapter has been compiled against FreeRDP 3.17.2; a real RDP-server
 session has not yet been tested. This first version uses the classic software
 GDI path, with RDPGFX disabled. Clipboard, audio, file transfer, reconnection,
 RDP gateways, Apple session selection, and other proprietary Apple extensions
-are not implemented. Apple support currently means ARD account authentication
-and the ordinary RFB desktop/input path.
+are not implemented in the RDP/VNC backends. HPSS is an optional experimental
+backend with software transport and native-depth HEVC tests; live Apple-server
+and HDR-display validation is still pending.
 
 Protocol references: [Kitty graphics](https://sw.kovidgoyal.net/kitty/graphics-protocol/),
 [Kitty keyboard](https://sw.kovidgoyal.net/kitty/keyboard-protocol/),

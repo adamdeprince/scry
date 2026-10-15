@@ -214,7 +214,7 @@ public:
             const auto name = "goblin-" + dimensions(size);
             // TigerVNC's RandR output accepts custom modes. A complete modeline
             // avoids a cvt dependency and supports even very small terminal sizes.
-            const auto width = size.width, height = size.height;
+            const int64_t width = size.width, height = size.height;
             const double clock = static_cast<double>(width + 48) * (height + 3) * 60 / 1000000;
             run({control_path_, "--newmode", name, std::to_string(clock),
                  std::to_string(width), std::to_string(width + 16), std::to_string(width + 32), std::to_string(width + 48),

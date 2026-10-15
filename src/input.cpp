@@ -8,7 +8,7 @@ namespace goblin {
 namespace {
 std::vector<int> numbers(std::string_view text) {
     std::vector<int> result;
-    while (!text.empty() && result.size() < 16) {
+    while (!text.empty()) {
         const auto end = text.find(';');
         const auto part = text.substr(0, end);
         int value = 0;
@@ -189,7 +189,7 @@ void Input::feed(std::string_view bytes) {
             if (next == '[') {
                 size_t end = 2;
                 while (end < pending_.size() && !(pending_[end] >= '@' && pending_[end] <= '~')) ++end;
-                if (end == pending_.size()) { if (end > 1024) pending_.clear(); return; }
+                if (end == pending_.size()) return;
                 csi(std::string_view(pending_).substr(2, end - 1));
                 pending_.erase(0, end + 1); continue;
             }
@@ -198,8 +198,12 @@ void Input::feed(std::string_view bytes) {
                 const auto end = pending_.find("\033\\", 2);
                 const auto bell = next == ']' ? pending_.find('\a', 2) : std::string::npos;
                 if (end == std::string::npos && bell == std::string::npos) {
-                    if (pending_.size() > 8192) pending_.clear();
                     return;
+                }
+                if (next == '_' && end != std::string::npos &&
+                    std::string_view(pending_).substr(2, end - 2) ==
+                        "Gi=" + std::to_string(hdr_query_id) + ";OK") {
+                    Event event; event.type = EventType::hdr_format; receive_(event);
                 }
                 if (bell < end) pending_.erase(0, bell + 1);
                 else pending_.erase(0, end + 2);

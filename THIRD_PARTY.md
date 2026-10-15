@@ -45,6 +45,40 @@ TigerVNC, xrandr, Sway, swaymsg, and wayvnc are separately installed programs
 launched by the Linux local-session modes. They are not copied into these
 packages. Their own licenses continue to apply.
 
+## Optional HPSS runtime
+
+The HPSS helper uses separately installed iShareScreen, pinned to
+`9ab40d3a3151524f954cff9d6239d891197c1705`, under AGPL-3.0-or-later.
+[GPLv3 section 13](https://www.gnu.org/licenses/gpl-3.0.html#section13)
+permits this combination with Scry's GPLv3 code; the AGPL network-interaction
+source provision applies to the combination. The iShareScreen license is
+preserved in `licenses/iShareScreen-AGPL-3.0.txt`. This optional runtime is not
+bundled by the current release scripts. See [HPSS.md](docs/HPSS.md) for its
+installation, pinned source, validation limits, and distribution requirements.
+
+The local decoder test used the following runtime versions. The installer pins
+PyAV and iShareScreen and accepts compatible versions of the remaining Python
+packages; distributors must record the versions actually installed and retain
+their notices and corresponding source where required.
+
+| Component tested | License |
+| --- | --- |
+| PyAV 19.0.1 | BSD-3-Clause; linked FFmpeg libraries have separate terms |
+| NumPy 2.5.4 | BSD-3-Clause, with bundled 0BSD/MIT/Zlib/CC0-1.0 notices |
+| cryptography 50.0.2 | Apache-2.0 or BSD-3-Clause; linked OpenSSL has separate terms |
+| PyCryptodome 4.0.0 | BSD-2-Clause and Unlicense |
+| pyperclip 1.11.0 | BSD-3-Clause |
+| cffi 2.1.1 | MIT-0 |
+| pycparser 3.11 | BSD-3-Clause |
+
+FFmpeg is normally LGPL-2.1-or-later, with GPL options selected by some builds.
+The optional color test uses libx265 encoding; x265 is GPL-2.0-or-later and
+compatible with GPLv3. Do not infer the license of an installed FFmpeg binary
+from PyAV's BSD license. Audit build flags and preserve the selected FFmpeg and
+codec source when redistributing them. Python and system runtimes retain their
+own terms. The runtime licenses above permit combination under GPLv3/AGPLv3;
+the binary packages without this optional runtime remain as described above.
+
 ## Source and notices
 
 Every release must publish the matching `goblin-scry-VERSION-source.tar.gz`

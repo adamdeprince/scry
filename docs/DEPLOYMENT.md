@@ -29,6 +29,15 @@ building. The requested targets are local Apple Silicon/macOS 26, `naamah`
 Each Scry build records the actual host OS and architecture independently. Do not
 substitute Debian's new-world `loong64` for Kylin's `loongarch64`.
 
+Current source includes an experimental HPSS adapter and installs its Python
+helper, setup script, and documentation. It does not bundle the optional Python
+runtime. Native CTest passes verify the adapter with a substitute transport;
+they do not imply an installed HEVC runtime or live HPSS validation on that
+host. Run the additional color and live checks in [HPSS.md](HPSS.md) before
+advertising HPSS as verified. Bundling its runtime requires the additional
+AGPL/FFmpeg source and license review described there. Published 0.1.0 binaries
+predate HPSS; use a new version when releasing the updated source.
+
 `packaging/build-hosts.json` records SSH names and native build environments.
 Loongson uses its existing Python 3.12.13 and CMake 4.3.2, with the system GCC 8
 and its old-world runtime. The build links GCC 8's separate `stdc++fs` library.
