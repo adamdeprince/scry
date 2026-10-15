@@ -18,6 +18,10 @@ target_compile_definitions(goblin_core PUBLIC GOBLIN_SCRY_VERSION="${PROJECT_VER
 target_compile_options(goblin_core PRIVATE -Wall -Wextra -Wpedantic)
 add_executable(goblin-scry src/main.cpp src/terminal.cpp src/session.cpp src/rdp.cpp src/vnc.cpp src/local.cpp)
 target_link_libraries(goblin-scry PRIVATE goblin_core)
+if(CMAKE_CXX_COMPILER_ID STREQUAL "GNU" AND CMAKE_CXX_COMPILER_VERSION VERSION_LESS 9)
+  # GCC 8 ships C++17 filesystem in a separate library (Kylin's native compiler).
+  target_link_libraries(goblin_core PUBLIC stdc++fs)
+endif()
 target_compile_options(goblin-scry PRIVATE -Wall -Wextra -Wpedantic)
 find_package(PkgConfig REQUIRED)
 if(GOBLIN_WITH_RDP)

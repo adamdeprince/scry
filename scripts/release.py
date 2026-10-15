@@ -21,6 +21,7 @@ ROOT = Path(__file__).resolve().parents[1]
 PINS = {
     'freerdp': '955ad49545919c35ed731bc7716b26ddf888833a',
     'libvncserver': '9b54b1ec32731bd23158ca014dc18014db4194c3',
+    'openssl': 'c8bd5a57108599ac650bbae77fcabe3109dab2e8',
 }
 SOURCE_ITEMS = ('CMakeLists.txt', 'README.md', 'LICENSE', 'THIRD_PARTY.md',
                 '.gitignore', 'src', 'tests', 'scripts', 'packaging', 'licenses', 'docs')
@@ -163,7 +164,9 @@ def relocate_macos(stage, dependency_prefix):
 def relocate_linux(stage, dependency_prefix):
     library_dir = stage / 'lib/goblin-scry'
     library_dir.mkdir(parents=True)
-    names = ('libfreerdp3.so.3', 'libwinpr3.so.3', 'libvncclient.so.1')
+    names = ['libfreerdp3.so.3', 'libwinpr3.so.3', 'libvncclient.so.1']
+    if (dependency_prefix / 'lib/libssl.so.3').is_file():
+        names += ['libssl.so.3', 'libcrypto.so.3']
     for name in names:
         candidates = list(dependency_prefix.rglob(name))
         if len(candidates) != 1:
@@ -173,9 +176,15 @@ def relocate_linux(stage, dependency_prefix):
     dependencies = {}
     for binary in binaries:
         run('patchelf', '--set-rpath', '$ORIGIN' if binary.parent == library_dir else '$ORIGIN/../lib/goblin-scry', binary)
+    # Inspect only after every library has its final runpath, including libcrypto.
+    for binary in binaries:
         dependencies[str(binary.relative_to(stage))] = output('ldd', binary)
         if 'not found' in dependencies[str(binary.relative_to(stage))]:
             raise RuntimeError('Unresolved dependencies for ' + str(binary))
+        for resolved in re.findall(r'=> (/\S+)', dependencies[str(binary.relative_to(stage))]):
+            path = Path(resolved).resolve()
+            if not any(path.is_relative_to(base) for base in (stage.resolve(), Path('/usr/lib'), Path('/lib'), Path('/lib64'))):
+                raise RuntimeError('Dependency outside package or system library directories: ' + str(path))
     return dependencies
 
 
@@ -185,16 +194,19 @@ def make_deb(root, stage, dest, package_version, architecture):
         work = Path(temporary)
         package_root = work / 'package'
         shutil.copytree(stage, package_root / 'usr')
+        control = package_root / 'DEBIAN'
+        control.mkdir()
         (work / 'debian').mkdir()
         (work / 'debian/control').write_text('Source: goblin-scry\n\nPackage: goblin-scry\nArchitecture: any\nDescription: Graphical desktops in your terminal\n')
-        (work / 'debian/shlibs.local').write_text('libfreerdp3 3 goblin-scry\nlibwinpr3 3 goblin-scry\nlibvncclient 1 goblin-scry\n')
+        private_shlibs = 'libfreerdp3 3 goblin-scry\nlibwinpr3 3 goblin-scry\nlibvncclient 1 goblin-scry\n'
+        if (stage / 'lib/goblin-scry/libssl.so.3').is_file():
+            private_shlibs += 'libssl 3 goblin-scry\nlibcrypto 3 goblin-scry\n'
+        (work / 'debian/shlibs.local').write_text(private_shlibs)
         lib = package_root / 'usr/lib/goblin-scry'
         binaries = [package_root / 'usr/bin/goblin-scry'] + sorted(lib.iterdir())
         dependencies = output('dpkg-shlibdeps', '-O', '-xgoblin-scry', '-l' + str(lib),
                               *['-e' + str(p) for p in binaries], cwd=work)
         depends = next(line.split('=', 1)[1] for line in dependencies.splitlines() if line.startswith('shlibs:Depends='))
-        control = package_root / 'DEBIAN'
-        control.mkdir()
         installed = sum(p.stat().st_size for p in package_root.rglob('*') if p.is_file())
         (control / 'control').write_text(
             'Package: goblin-scry\nVersion: ' + package_version + '\nArchitecture: ' + architecture + '\n'
@@ -241,7 +253,8 @@ def build_native(args):
     env['PKG_CONFIG_PATH'] = os.pathsep.join(pkgdirs + [env.get('PKG_CONFIG_PATH', '')])
     build = work / 'build'
     run('cmake', '-S', root, '-B', build, '-DCMAKE_BUILD_TYPE=Release',
-        '-DCMAKE_INSTALL_LIBDIR=lib', '-DCMAKE_INSTALL_PREFIX=/usr', env=env)
+        '-DCMAKE_INSTALL_LIBDIR=lib', '-DCMAKE_INSTALL_PREFIX=/usr',
+        '-DPython3_EXECUTABLE=' + sys.executable, env=env)
     run('cmake', '--build', build, '--parallel', env['BUILD_JOBS'], env=env)
     run('ctest', '--test-dir', build, '--output-on-failure', env=env)
     stage = work / 'stage'
@@ -250,7 +263,7 @@ def build_native(args):
     clean_env = env.copy()
     clean_env.pop('DYLD_LIBRARY_PATH', None)
     clean_env.pop('LD_LIBRARY_PATH', None)
-    run('python3', root / 'tests/terminal_test.py', stage / 'bin/goblin-scry', env=clean_env)
+    run(sys.executable, root / 'tests/terminal_test.py', stage / 'bin/goblin-scry', env=clean_env)
     help_text = output(stage / 'bin/goblin-scry', '--help', env=clean_env)
     if 'FreeRDP3 LibVNCClient' not in help_text:
         raise RuntimeError('A required protocol backend is missing')
@@ -270,7 +283,8 @@ def build_native(args):
                 'source_sha256': expected, 'license': 'GPL-3.0-only', 'libraries': libraries,
                 'tests': {'ctest': 'passed', 'packaged_terminal': 'passed', 'backends': 'passed'},
                 'compiler': output('c++', '--version'),
-                'openssl': output('pkg-config', '--modversion', 'openssl', env=env)}
+                'openssl': output('pkg-config', '--modversion', 'openssl', env=env),
+                'bundled_openssl': (prefix / 'lib/libssl.so.3').is_file()}
     write_json(doc / 'build-info.json', manifest)
     base = 'brew' if system == 'Darwin' else 'apt'
     (doc / 'SOURCE.txt').write_text('Complete matching source (including bundled libraries):\nhttps://' + base + '.goblinreactor.com/sources/' + source.name + '\nSHA-256: ' + expected + '\n')
@@ -302,13 +316,18 @@ def build_hosts(args):
     if not re.fullmatch('[0-9a-f]{64}', expected):
         raise RuntimeError('Invalid source hash')
     remote = '/tmp/goblin-scry-release-' + expected
+    settings = json.loads((ROOT / 'packaging/build-hosts.json').read_text())
     # Only fixed defaults/explicit CLI host names are accepted; no shell interpolation.
     def build(host):
         if not re.fullmatch('[a-zA-Z0-9_.@-]+', host) or host.startswith('-'):
             raise RuntimeError('Invalid host name')
-        run('ssh', host, shlex.join(['mkdir', '-p', remote]))
-        run('scp', source, str(source) + '.sha256', __file__, host + ':' + remote + '/')
-        command = [args.remote_python, remote + '/release.py', 'build-native',
+        config = settings.get(host, {})
+        destination = config.get('ssh_host', host)
+        run('ssh', '-S', 'none', destination, shlex.join(['mkdir', '-p', remote]))
+        run('scp', '-o', 'ControlPath=none', source, str(source) + '.sha256', __file__, destination + ':' + remote + '/')
+        environment = config.get('environment', {})
+        command = ['env'] + [key + '=' + value for key, value in environment.items()]
+        command += [args.remote_python or config.get('python', 'python3'), remote + '/release.py', 'build-native',
                    '--source', remote + '/' + source.name, '--sha256', expected,
                    '--output', remote + '/artifacts', '--label', host]
         if host == 'loongson':
@@ -316,8 +335,8 @@ def build_hosts(args):
         dest = args.output / host
         dest.mkdir(parents=True, exist_ok=True)
         with (dest / 'build.log').open('w') as log:
-            run('ssh', host, shlex.join(command), stdout=log, stderr=subprocess.STDOUT)
-        run('rsync', '-a', host + ':' + remote + '/artifacts/', str(dest) + '/')
+            run('ssh', '-S', 'none', destination, shlex.join(command), stdout=log, stderr=subprocess.STDOUT)
+        run('rsync', '-a', '-e', 'ssh -S none', destination + ':' + remote + '/artifacts/', str(dest) + '/')
         return host
     hosts = args.host or ['naamah', 'graviton5', 'loongson']
     with concurrent.futures.ThreadPoolExecutor(max_workers=len(hosts)) as executor:
@@ -352,7 +371,7 @@ def main():
     hosts.add_argument('--source', type=Path, required=True)
     hosts.add_argument('--output', type=Path, default=ROOT / 'dist')
     hosts.add_argument('--host', action='append')
-    hosts.add_argument('--remote-python', default='python3')
+    hosts.add_argument('--remote-python')
     hosts.set_defaults(action=build_hosts)
     args = parser.parse_args()
     args.action(args)

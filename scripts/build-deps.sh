@@ -7,11 +7,36 @@ repo_dir=$(CDPATH= cd -- "$(dirname -- "$0")/.." && pwd)
 dependency_prefix=${GOBLIN_DEPENDENCY_PREFIX:-"$repo_dir/build/deps"}
 dependency_work=${GOBLIN_DEPENDENCY_WORK:-"$repo_dir/build/deps-work"}
 build_jobs=${BUILD_JOBS:-$(getconf _NPROCESSORS_ONLN)}
+mkdir -p "$dependency_prefix" "$dependency_work"
+
+if [ "${GOBLIN_BUNDLE_OPENSSL:-0}" = 1 ]; then
+    openssl_source="$repo_dir/vendor/openssl"
+    if [ ! -d "$openssl_source" ]; then
+        openssl_source="$dependency_work/openssl"
+        if [ ! -d "$openssl_source/.git" ]; then
+            git clone --depth 1 --branch openssl-3.6.5 https://github.com/openssl/openssl.git "$openssl_source"
+        fi
+        test "$(git -C "$openssl_source" rev-parse HEAD)" = c8bd5a57108599ac650bbae77fcabe3109dab2e8
+    fi
+    mkdir -p "$dependency_work/openssl-build"
+    (
+        cd "$dependency_work/openssl-build"
+        # Generic C supports Kylin's old-world LoongArch ABI and GCC 8 assembler.
+        # Built-in providers avoid any runtime module path outside the package.
+        perl "$openssl_source/Configure" linux-generic64 shared no-module no-asm \
+            --prefix="$dependency_prefix" --libdir=lib --openssldir=/etc/ssl
+        make -j "$build_jobs"
+        make test TESTS='test_evp test_sslapi test_verify'
+        make install_sw
+    )
+    PKG_CONFIG_PATH="$dependency_prefix/lib/pkgconfig${PKG_CONFIG_PATH:+:$PKG_CONFIG_PATH}"
+    CMAKE_PREFIX_PATH="$dependency_prefix${CMAKE_PREFIX_PATH:+;$CMAKE_PREFIX_PATH}"
+    export PKG_CONFIG_PATH CMAKE_PREFIX_PATH
+fi
 pkg-config --atleast-version=3.0 openssl || {
-    echo 'Release builds require OpenSSL 3 or newer (set PKG_CONFIG_PATH/CMAKE_PREFIX_PATH for a private installation).' >&2
+    echo 'Release builds require OpenSSL 3 or newer; use GOBLIN_BUNDLE_OPENSSL=1 on older Linux systems.' >&2
     exit 1
 }
-mkdir -p "$dependency_prefix" "$dependency_work"
 
 if [ -d "$repo_dir/vendor/freerdp" ] && [ -d "$repo_dir/vendor/libvncserver" ]; then
     freerdp_source="$repo_dir/vendor/freerdp"
@@ -31,6 +56,7 @@ fi
 
 cmake -S "$freerdp_source" -B "$dependency_work/freerdp-build" \
     -DCMAKE_BUILD_TYPE=Release -DCMAKE_INSTALL_PREFIX="$dependency_prefix" \
+    -DCMAKE_INSTALL_RPATH="$dependency_prefix/lib" \
     -DCMAKE_PREFIX_PATH="${CMAKE_PREFIX_PATH:-}" -DCMAKE_EXPORT_NO_PACKAGE_REGISTRY=ON \
     -DWITH_CLIENT=OFF -DWITH_SERVER=OFF -DWITH_CLIENT_COMMON=OFF \
     -DWITH_CHANNELS=OFF -DWITH_X11=OFF -DWITH_WAYLAND=OFF \
@@ -45,6 +71,7 @@ cmake --install "$dependency_work/freerdp-build"
 cmake -S "$vnc_source" -B "$dependency_work/vnc-build" \
     -DCMAKE_POLICY_VERSION_MINIMUM=3.5 -DCMAKE_BUILD_TYPE=Release \
     -DCMAKE_INSTALL_PREFIX="$dependency_prefix" -DCMAKE_PREFIX_PATH="${CMAKE_PREFIX_PATH:-}" \
+    -DCMAKE_INSTALL_RPATH="$dependency_prefix/lib" \
     -DWITH_EXAMPLES=OFF -DWITH_TESTS=OFF -DWITH_SDL=OFF -DWITH_GTK=OFF \
     -DWITH_QT=OFF -DWITH_XCB=OFF -DWITH_GNUTLS=OFF -DWITH_GCRYPT=OFF \
     -DWITH_OPENSSL=ON -DWITH_FFMPEG=OFF -DWITH_LIBSSHTUNNEL=OFF \

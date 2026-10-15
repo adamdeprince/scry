@@ -26,22 +26,30 @@ sudo apt install build-essential cmake pkg-config python3 libssl-dev \
 Check host OS, `dpkg --print-architecture`, compiler, Python, and OpenSSL before
 building. The requested targets are local Apple Silicon/macOS 26, `naamah`
 (amd64), `graviton5` (arm64), and `loongson` (Kylin old-world loongarch64).
-Recent sibling-project release records identify these Linux targets, but each
-Scry build records the actual host OS and architecture independently. Do not
+Each Scry build records the actual host OS and architecture independently. Do not
 substitute Debian's new-world `loong64` for Kylin's `loongarch64`.
 
-Older Kylin may need a private newer Python/CMake/compiler/OpenSSL installation.
-Set `PATH`, `PKG_CONFIG_PATH`, and `CMAKE_PREFIX_PATH` in the build environment;
-never replace the operating system's OpenSSL or C++ runtime. If a non-system
-runtime must be bundled, extend the dependency inventory and matching source
-archive before publishing. The current scripts stop if dependencies cannot be
-resolved; Kylin is not considered verified until its native build passes.
+`packaging/build-hosts.json` records SSH names and native build environments.
+Loongson uses its existing Python 3.12.13 and CMake 4.3.2, with the system GCC 8
+and its old-world runtime. The build links GCC 8's separate `stdc++fs` library.
+It builds pinned OpenSSL 3.6.5 privately, including its providers in libcrypto,
+and packages `libssl.so.3`/`libcrypto.so.3` alongside the protocol libraries.
+The operating system's OpenSSL and C++ runtime are not replaced. OpenSSL EVP,
+TLS API, and certificate-verification tests run before the Scry build.
+Update the host configuration when toolchain paths change.
 
 ## Create the source snapshot
 
 Increase the version in `CMakeLists.txt` before replacing a public release.
-Initialize pinned dependency checkouts with `sh scripts/build-deps.sh` if they
-are not already available. The source archiver verifies the exact dependency
+Initialize pinned protocol checkouts with `sh scripts/build-deps.sh` if they
+are not already available. The matching source also includes OpenSSL for Kylin:
+
+```sh
+git clone --depth 1 --branch openssl-3.6.5 \
+  https://github.com/openssl/openssl.git build/deps-work/openssl
+```
+
+Skip that clone if the pinned checkout already exists. The source archiver verifies the exact dependency
 commits and refuses dirty checkouts. It includes their complete source and
 notices so the GPL binary downloads have matching source available.
 
@@ -65,9 +73,11 @@ python3 scripts/release.py build-hosts \
   --source dist/source/goblin-scry-0.1.0-source.tar.gz
 ```
 
-`build-hosts` uses the existing SSH aliases and builds on all three hosts. Use
+`build-hosts` uses `packaging/build-hosts.json` and builds on all three hosts. Use
 `--host naamah` to retry one target, or `--remote-python /path/to/python3.12`
-when the host's default Python is too old. Each host gets an isolated directory
+to override a host's configured interpreter. SSH connection sharing is disabled
+so the build does not depend on access to another session's control socket.
+Each host gets an isolated directory
 keyed by the source checksum; nothing is installed globally. Build logs and
 artifacts return to `dist/HOST/`. `--suite` is available on `build-native` for
 OS releases without `VERSION_CODENAME`; the Loongson workflow supplies `kylin`.
@@ -96,8 +106,11 @@ python3 scripts/deploy.py packages
 Publication refuses missing builds, failed tests, changed artifact bytes, or
 different source snapshots. Uploads use the rsync daemon destinations
 `hail::distribution/brew.goblinreactor.com` and
-`hail::distribution/apt.goblinreactor.com`. Because `hail` can be only an SSH
-alias, the script resolves its configured hostname using `ssh -G` for rsync.
+`hail::distribution/apt.goblinreactor.com`. Hail's SSH alias points to a public
+address, but its rsync daemon accepts trusted LAN/VPN connections only. For
+`hail`, deployment uses its LAN address `192.168.1.50`; set
+`GOBLIN_RSYNC_HOST` to an accessible VPN address when deploying off-LAN.
+For other hosts the script resolves their SSH hostname using `ssh -G`.
 
 The repository publisher runs on hail and uses the existing private
 `/home/adam/.local/share/goblin-apt` administration directory. Its signing key,

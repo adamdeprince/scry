@@ -5,6 +5,7 @@
 import argparse
 import importlib.util
 import json
+import os
 from pathlib import Path
 import shlex
 import shutil
@@ -14,6 +15,11 @@ from release import ROOT, digest, output, run
 
 
 def rsync_host(host):
+    if os.environ.get('GOBLIN_RSYNC_HOST'):
+        return os.environ['GOBLIN_RSYNC_HOST']
+    if host == 'hail':
+        # Hail exposes its rsync daemon on trusted interfaces, not its public SSH IP.
+        return '192.168.1.50'
     # SSH aliases are not necessarily DNS names usable by the rsync daemon.
     config = output('ssh', '-G', host)
     return next(line.split(None, 1)[1] for line in config.splitlines() if line.startswith('hostname '))
@@ -31,7 +37,7 @@ def packages(args):
     identity = 'goblin-scry-' + builds['local']['version'] + '-' + builds['local']['source_sha256']
     remote_relative = '.incoming/' + identity + '/'
     remote = '/mnt/distribution/apt.goblinreactor.com/' + remote_relative
-    run('ssh', args.host, shlex.join(['mkdir', '-p', remote,
+    run('ssh', '-S', 'none', args.host, shlex.join(['mkdir', '-p', remote,
         '/mnt/distribution/brew.goblinreactor.com/' + remote_relative + 'local']))
     with tempfile.TemporaryDirectory(prefix='scry-publish-') as temporary:
         stage = Path(temporary)
@@ -43,7 +49,7 @@ def packages(args):
         # Keep uploads off the indexed release paths until the publisher validates them.
         run('rsync', '-a', '--checksum', str(stage) + '/', destination(args.host, 'apt.goblinreactor.com', remote_relative))
         run('rsync', '-a', '--checksum', str(stage / 'local') + '/', destination(args.host, 'brew.goblinreactor.com', remote_relative + 'local/'))
-        run('ssh', args.host, shlex.join(['python3', remote + 'publish-repositories.py', '--stage', remote]))
+        run('ssh', '-S', 'none', args.host, shlex.join(['python3', remote + 'publish-repositories.py', '--stage', remote]))
 
 
 def website(args):
@@ -59,10 +65,10 @@ def website(args):
     run('rsync', '-a', '--checksum', index, destination(args.host, 'scry.goblinreactor.com'))
     expected = shlex.quote(digest_before)
     command = "test \"$(sha256sum /mnt/distribution/scry.goblinreactor.com/index.html | cut -d' ' -f1)\" = " + expected
-    run('ssh', args.host, command)
+    run('ssh', '-S', 'none', args.host, command)
     for url in ('http://192.168.1.11:8888/scry.goblinreactor.com/', 'http://127.0.0.1/'):
         command = ['curl', '--fail', '--silent', '--show-error', '-H', 'Host: scry.goblinreactor.com', url]
-        text = output('ssh', args.host, shlex.join(command))
+        text = output('ssh', '-S', 'none', args.host, shlex.join(command))
         if 'Goblin Scry' not in text:
             raise RuntimeError('Unexpected origin response: ' + url)
     text = output('curl', '--fail', '--silent', '--show-error', 'https://scry.goblinreactor.com/')
@@ -74,9 +80,9 @@ def website(args):
 def nginx(args):
     config = ROOT / 'packaging/nginx/scry.goblinreactor.com.conf'
     remote = '/tmp/goblin-scry-nginx-' + digest(config)
-    run('ssh', args.host, shlex.join(['mkdir', '-p', remote]))
-    run('scp', config, ROOT / 'scripts/install-nginx.sh', args.host + ':' + remote + '/')
-    run('ssh', args.host, shlex.join(['sudo', '-n', 'sh', remote + '/install-nginx.sh', remote + '/' + config.name]))
+    run('ssh', '-S', 'none', args.host, shlex.join(['mkdir', '-p', remote]))
+    run('scp', '-o', 'ControlPath=none', config, ROOT / 'scripts/install-nginx.sh', args.host + ':' + remote + '/')
+    run('ssh', '-S', 'none', args.host, shlex.join(['sudo', '-n', 'sh', remote + '/install-nginx.sh', remote + '/' + config.name]))
 
 
 def main():

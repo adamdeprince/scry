@@ -24,9 +24,8 @@ Apache-2.0 license.
 
 ## Packages and releases
 
-Native release targets are Apple Silicon/macOS 26 and the Linux environments
-on `naamah`, `graviton5`, and `loongson`. Publication and native Linux verification
-are pending for the first release. Once a release is listed in the repositories:
+Native release targets are Apple Silicon/macOS 26, Ubuntu 26.04 amd64 and arm64,
+and Kylin V10 old-world LoongArch. Install a release listed in the repositories:
 
 ```sh
 brew tap goblinreactor/tap https://brew.goblinreactor.com/homebrew-tap.git

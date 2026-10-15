@@ -28,9 +28,11 @@ Sources reviewed:
 | --- | --- | --- |
 | FreeRDP / WinPR 3.17.2 | Apache-2.0, with individual permissive notices | Private shared libraries; exact source included in the source archive |
 | LibVNCClient 0.9.15 | GPL-2.0-or-later, used under GPLv3 | Private shared library; exact source included in the source archive |
-| OpenSSL 3 | Apache-2.0 | Runtime package dependency |
+| OpenSSL 3 | Apache-2.0 | Runtime package dependency on macOS/Ubuntu; private OpenSSL 3.6.5 shared libraries on Kylin, with exact source and notices included |
 | libjpeg-turbo | BSD-style/IJG/zlib licenses; see upstream LICENSE.md | Runtime package dependency when JPEG is enabled |
 | zlib | Zlib | Operating-system/runtime package dependency |
+| ICU | MIT/Unicode terms | Runtime package dependency for WinPR character conversion on Linux |
+| Zstandard | BSD-3-Clause (dual-license option selected) | Transitive runtime dependency of Ubuntu's OpenSSL package |
 | C/C++ runtime and platform frameworks | Platform-specific system licenses | Operating-system/compiler runtime dependencies |
 
 Release builds require OpenSSL **3 or newer**. OpenSSL 1.x has different license
@@ -48,7 +50,7 @@ packages. Their own licenses continue to apply.
 Every release must publish the matching `goblin-scry-VERSION-source.tar.gz`
 alongside its binary downloads, at no additional charge. It contains the full
 Goblin Scry source, build and packaging scripts, pinned FreeRDP and LibVNCServer
-sources, and their original copyright/license notices. The binary packages
+sources, OpenSSL 3.6.5 source for the Kylin build, and their original copyright/license notices. The binary packages
 install this document, GPLv3, upstream license texts, and the source URL.
 Source archives must remain available for as long as the corresponding binaries.
 

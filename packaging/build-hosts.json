@@ -1,0 +1,13 @@
+{
+  "naamah": {"ssh_host": "adam@naamah"},
+  "graviton5": {},
+  "loongson": {
+    "python": "/home/adam/.pyenv/versions/3.12.13/bin/python3.12",
+    "environment": {
+      "PATH": "/home/adam/.pyenv/versions/3.12.13/bin:/opt/loongson-cmake-4.3.2/bin:/usr/local/bin:/usr/bin:/bin",
+      "CC": "/usr/bin/gcc",
+      "CXX": "/usr/bin/g++",
+      "GOBLIN_BUNDLE_OPENSSL": "1"
+    }
+  }
+}
