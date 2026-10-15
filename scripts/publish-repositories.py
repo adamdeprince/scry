@@ -62,6 +62,53 @@ def artifact(site, path):
             'filename': path.name, 'size': path.stat().st_size, 'sha256': digest(path)}
 
 
+def installation_reports(stage, builds):
+    reports = {}
+    for target, info in builds.items():
+        report = json.loads((stage / target / 'public-install.json').read_text())
+        if (report['build_host'], report['version'], report['source_sha256'], report['artifact_sha256']) != (
+                target, info['version'], info['source_sha256'], info['sha256']):
+            raise RuntimeError('Installation report refers to a different build: ' + target)
+        if any(report['tests'].get(test) != 'passed' for test in ('package_manager', 'backends', 'terminal')):
+            raise RuntimeError('Installation verification failed: ' + target)
+        reports[target] = report
+    return reports
+
+
+def record_installations(stage, admin, distribution, builds):
+    reports = installation_reports(stage, builds)
+    for name in ('apt', 'brew'):
+        site = distribution / (name + '.goblinreactor.com')
+        with (admin / (name + '-publish.lock')).open('a') as lock:
+            fcntl.flock(lock, fcntl.LOCK_EX)
+            catalog = json.loads((site / 'packages.json').read_text())
+            targets = ('local',) if name == 'brew' else TARGETS[1:]
+            inventory = {a['path']: a for a in catalog.get('artifacts', []) if 'path' in a}
+            legacy = [a for a in catalog.get('artifacts', []) if 'path' not in a]
+            for target in targets:
+                records = [p for p in catalog['packages'] if p['name'] == 'goblin-scry' and p.get('build_host') == target]
+                if len(records) != 1 or records[0]['sha256'] != builds[target]['sha256']:
+                    raise RuntimeError('Published build differs from installation report: ' + target)
+                report_path = site / 'releases' / ('goblin-scry-' + builds[target]['version']) / target / 'public-install.json'
+                write_json(report_path, reports[target])
+                record = artifact(site, report_path)
+                inventory[record['path']] = record
+                records[0]['verification'].update(public_install='passed', report=record['url'])
+            catalog['artifacts'] = legacy + sorted(inventory.values(), key=lambda a: a['path'])
+            catalog['updated'] = datetime.datetime.now(datetime.timezone.utc).isoformat()
+            candidate = stage / (name + '-verified-packages.json')
+            write_json(candidate, catalog)
+            signature = candidate.with_suffix('.json.asc')
+            run('gpg', '--homedir', admin / 'gnupg', '--batch', '--yes', '--local-user', KEY,
+                '--armor', '--detach-sign', '--output', signature, candidate)
+            run('gpgv', '--keyring', site / 'goblinreactor-archive-keyring.gpg', signature, candidate)
+            for src, dst in ((candidate, site / 'packages.json'), (signature, site / 'packages.json.asc')):
+                temporary = dst.with_name(dst.name + '.scry-new')
+                shutil.copy2(src, temporary)
+                temporary.replace(dst)
+    print('Recorded all four installed-package checks in signed catalogs.')
+
+
 def publish(args):
     stage, admin, distribution = args.stage.resolve(), args.admin.resolve(), args.distribution.resolve()
     builds = validate(stage)
@@ -69,13 +116,18 @@ def publish(args):
     if args.check:
         print('All four native build manifests and source/binary checksums passed.')
         return
+    if args.record_installations:
+        record_installations(stage, admin, distribution, builds)
+        return
     with contextlib.ExitStack() as stack:
         # Use the same locks as the existing Goblin publishers.
         for name in ('apt', 'brew'):
             lock = stack.enter_context((admin / (name + '-publish.lock')).open('a'))
             fcntl.flock(lock, fcntl.LOCK_EX)
-        backup = stage / ('before-publication-' + datetime.datetime.now(datetime.timezone.utc).strftime('%Y%m%dT%H%M%S.%fZ'))
-        backup.mkdir()
+        backups = admin / 'goblin-scry-backups'
+        backups.mkdir(mode=0o700, exist_ok=True)
+        backup = backups / datetime.datetime.now(datetime.timezone.utc).strftime('%Y%m%dT%H%M%S.%fZ')
+        backup.mkdir(mode=0o700)
         for name in ('apt', 'brew'):
             site = distribution / (name + '.goblinreactor.com')
             for filename in ('packages.json', 'packages.json.asc', 'README.md', 'README.txt', 'index.html'):
@@ -101,7 +153,9 @@ def publish(args):
             raise RuntimeError('Formula checksum does not match binary archive')
         immutable(stage / 'local' / builds['local']['artifact'], brew / release_path / builds['local']['artifact'])
         immutable(formula, brew / release_path / formula.name)
-        with tempfile.TemporaryDirectory(prefix='scry-tap-', dir=stage) as temporary:
+        # The public NFS mount maps ownership to its distribution account. Keep
+        # the working checkout on local disk so Git's ownership check remains on.
+        with tempfile.TemporaryDirectory(prefix='scry-tap-') as temporary:
             checkout = Path(temporary) / 'tap'
             run(*git, 'clone', tap, checkout)
             (checkout / 'Formula').mkdir(exist_ok=True)
@@ -198,4 +252,5 @@ if __name__ == '__main__':
     parser.add_argument('--admin', type=Path, default=Path('/home/adam/.local/share/goblin-apt'))
     parser.add_argument('--distribution', type=Path, default=Path('/mnt/distribution'))
     parser.add_argument('--check', action='store_true')
+    parser.add_argument('--record-installations', action='store_true')
     publish(parser.parse_args())

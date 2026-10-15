@@ -131,7 +131,9 @@ B7B6 1E8C B85A 9270 5303 64F2 3273 CB62 402F C793
 The publisher never creates an unsigned replacement repository, rewrites the
 tap history, or deletes old packages. Repository configuration must already
 contain the target suites and architectures; inspect it on hail before the
-first release. Backups are under the upload stage's `before-publication-*`.
+first release. Private backups are under the administration directory's
+`goblin-scry-backups/`. The temporary Git checkout stays on hail's local disk;
+the public NFS mount maps file ownership to its distribution account.
 If publication fails midway, fix the cause and rerun with the same immutable
 artifacts. Restore metadata/database/tap head from the backup only when no
 other publication has occurred; hold the same locks while restoring.
@@ -156,6 +158,27 @@ signature checking enabled. The published manifest initially says
 `public_install: pending`; native package tests do not imply that the public
 repository installation has passed. Record actual public install results in
 the release report before declaring the release fully verified.
+
+After the package-manager commands above, run the installed binary's terminal
+integration test and save a report on each target (substitute its build label):
+
+```sh
+python3 scripts/verify-install.py --build-info dist/local/build-info.json \
+  --output dist/local/public-install.json
+```
+
+On a build host, use its modern Python, build manifest, and source checkout.
+`--terminal-test` can point to `tests/terminal_test.py` in the extracted source.
+The check rejects a different package version, architecture, executable on
+PATH, or missing protocol backend; Homebrew's formula test also runs.
+Copy each report back to `dist/HOST/public-install.json`, then run
+`python3 scripts/deploy.py verification`. This validates every report against
+the release hashes, publishes the reports, and marks public installation as
+passed in the signed package catalogs.
+
+The 0.1.0 binary source snapshot is commit `d52f3d7`. Subsequent commits improve
+publication and installation verification without changing those binary sources.
+Keep the published source archive immutable when updating deployment scripts.
 
 ## Website and nginx
 

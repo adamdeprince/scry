@@ -68,6 +68,27 @@ class ReleaseTests(unittest.TestCase):
         with self.assertRaisesRegex(RuntimeError, 'successful tests'):
             publisher.validate(self.root)
 
+    def test_installation_reports_must_match_release(self):
+        self.fixture()
+        builds = publisher.validate(self.root)
+        for target, info in builds.items():
+            release.write_json(self.root / target / 'public-install.json', {
+                'build_host': target, 'version': info['version'],
+                'source_sha256': info['source_sha256'], 'artifact_sha256': info['sha256'],
+                'tests': {'package_manager': 'passed', 'backends': 'passed', 'terminal': 'passed'}})
+        self.assertEqual(set(publisher.installation_reports(self.root, builds)), set(builds))
+        path = self.root / 'loongson/public-install.json'
+        report = json.loads(path.read_text())
+        report['tests']['terminal'] = 'failed'
+        release.write_json(path, report)
+        with self.assertRaisesRegex(RuntimeError, 'verification failed'):
+            publisher.installation_reports(self.root, builds)
+        report['tests']['terminal'] = 'passed'
+        report['artifact_sha256'] = 'different build'
+        release.write_json(path, report)
+        with self.assertRaisesRegex(RuntimeError, 'different build'):
+            publisher.installation_reports(self.root, builds)
+
     def test_distinct_loongarch_abi(self):
         self.fixture()
         path = self.root / 'loongson/build-info.json'

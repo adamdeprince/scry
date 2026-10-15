@@ -34,6 +34,8 @@ def packages(args):
     module = importlib.util.module_from_spec(spec)
     spec.loader.exec_module(module)
     builds = module.validate(args.dist)
+    if args.action == 'verification':
+        module.installation_reports(args.dist, builds)
     identity = 'goblin-scry-' + builds['local']['version'] + '-' + builds['local']['source_sha256']
     remote_relative = '.incoming/' + identity + '/'
     remote = '/mnt/distribution/apt.goblinreactor.com/' + remote_relative
@@ -49,7 +51,10 @@ def packages(args):
         # Keep uploads off the indexed release paths until the publisher validates them.
         run('rsync', '-a', '--checksum', str(stage) + '/', destination(args.host, 'apt.goblinreactor.com', remote_relative))
         run('rsync', '-a', '--checksum', str(stage / 'local') + '/', destination(args.host, 'brew.goblinreactor.com', remote_relative + 'local/'))
-        run('ssh', '-S', 'none', args.host, shlex.join(['python3', remote + 'publish-repositories.py', '--stage', remote]))
+        command = ['python3', remote + 'publish-repositories.py', '--stage', remote]
+        if args.action == 'verification':
+            command.append('--record-installations')
+        run('ssh', '-S', 'none', args.host, shlex.join(command))
 
 
 def website(args):
@@ -87,11 +92,11 @@ def nginx(args):
 
 def main():
     parser = argparse.ArgumentParser(description=__doc__)
-    parser.add_argument('action', choices=('packages', 'website', 'nginx'))
+    parser.add_argument('action', choices=('packages', 'website', 'nginx', 'verification'))
     parser.add_argument('--host', default='hail')
     parser.add_argument('--dist', type=Path, default=ROOT / 'dist')
     args = parser.parse_args()
-    {'packages': packages, 'website': website, 'nginx': nginx}[args.action](args)
+    {'packages': packages, 'website': website, 'nginx': nginx, 'verification': packages}[args.action](args)
 
 
 if __name__ == '__main__':
